@@ -1,5 +1,5 @@
 node_modules/
-android/
+/android/
 www/vendor/*.js
 tests/shots/
 *.log
