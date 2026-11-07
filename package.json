@@ -1,0 +1,21 @@
+{
+  "name": "aura-tv",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aura TV - an IPTV player (M3U / Xtream) for Android phones and TVs. Ships no content.",
+  "scripts": {
+    "test": "node --test tests/unit.test.mjs",
+    "prepare:web": "node scripts/prepare-web.mjs",
+    "serve": "node tests/mock-server.cjs",
+    "icons": "python3 scripts/make_icons.py",
+    "android:add": "cap add android && python3 scripts/patch_android.py && cap sync android",
+    "android:debug": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "hls.js": "^1.5.0",
+    "mpegts.js": "^1.7.3"
+  }
+}
