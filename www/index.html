@@ -9,6 +9,35 @@
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+<script>
+/* If something ever breaks at startup, show the reason on screen instead of a blank page. Tap to dismiss. */
+(function () {
+  function show(msg) {
+    try {
+      var d = document.getElementById('crash');
+      if (!d) {
+        d = document.createElement('pre'); d.id = 'crash';
+        d.style.cssText = 'position:fixed;z-index:99999;left:8px;right:8px;top:8px;margin:0;background:#3a0d12;color:#ffe3e6;border:1px solid #e0707a;padding:10px;border-radius:10px;font:12px/1.5 monospace;white-space:pre-wrap;word-break:break-all;direction:ltr;text-align:left;max-height:55vh;overflow:auto';
+        d.onclick = function () { d.remove(); };
+        document.body.appendChild(d);
+      }
+      d.textContent += msg + '\n';
+    } catch (e) { /* ignore */ }
+  }
+  window.addEventListener('error', function (e) {
+    var t = e.target;
+    if (t && t !== window && t.tagName) {
+      // only a failed app script/stylesheet is fatal; images, <video> streams and optional vendor libs are not
+      var u = t.src || t.href || '';
+      if ((t.tagName === 'SCRIPT' || t.tagName === 'LINK') && !/\/vendor\//.test(u)) show('Load error: ' + u);
+    }
+    else if (e.message) show('JS error: ' + e.message + ' (' + String(e.filename || '').split('/').pop() + ':' + (e.lineno || '?') + ')');
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason; show('Promise error: ' + ((r && r.message) || r));
+  });
+})();
+</script>
 <div id="app">
   <header class="topbar">
     <div class="brand" aria-label="Aura TV">

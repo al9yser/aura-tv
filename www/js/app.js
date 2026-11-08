@@ -590,16 +590,29 @@ async function openSeries(c) {
 /* ------------------------------------------------------------------ player */
 const playerEl = $('#player');
 // On Android the native ExoPlayer plugin does the decoding; in a browser the <video> element does.
-const NATIVE = isNative();
-const nv = NATIVE ? new NativeVideo(window.Capacitor.registerPlugin('AuraPlayer')) : null;
-const video = NATIVE ? nv : $('#video');
+// Anything going wrong while setting the native path up must never break the app: fall back to <video>.
 const playerHooks = {
   onBuffering: (b) => { if (b) { if (!S.statusMode) setStatus('buffer'); } else if (S.statusMode === 'buffer' || S.statusMode === 'loading') setStatus(null); },
   onPlaying: () => { if (S.statusMode && S.statusMode !== 'error') setStatus(null); },
   onFatal: () => onFatal(),
 };
-const engine = NATIVE ? new NativeEngine(nv, playerHooks) : new Engine(video, playerHooks);
-if (NATIVE) playerEl.classList.add('native');
+let NATIVE = false;
+let nv = null;
+let video = $('#video');
+let engine = null;
+try {
+  if (isNative()) {
+    const plugin = window.Capacitor.registerPlugin('AuraPlayer');
+    const candidate = new NativeVideo(plugin);
+    engine = new NativeEngine(candidate, playerHooks);
+    nv = candidate; video = candidate; NATIVE = true;
+    playerEl.classList.add('native');
+  }
+} catch (e) {
+  NATIVE = false; nv = null; video = $('#video'); engine = null;
+  try { console.error('native player unavailable, using <video>:', e && e.message); } catch (_) { /* ignore */ }
+}
+if (!engine) engine = new Engine(video, playerHooks);
 
 function setStatus(mode, text, actions) {
   S.statusMode = mode;

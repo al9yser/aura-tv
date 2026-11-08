@@ -287,6 +287,43 @@ const ok = (cond, name) => { if (cond) { passed++; console.log('  ✓', name); }
   ok(true, 'native error on first play shows the error screen');
   await nctx.close();
 
+  console.log('Resilience: hostile / strict Capacitor environments must never blank the app');
+  const variants = {
+    'registerPlugin throws': () => { window.Capacitor = { isNativePlatform: () => true, isPluginAvailable: () => true, registerPlugin: () => { throw new Error('boom: not implemented'); } }; },
+    'addListener throws synchronously': () => { const p = { addListener: () => { throw new Error('UNIMPLEMENTED'); } }; window.Capacitor = { isNativePlatform: () => true, isPluginAvailable: () => true, registerPlugin: () => p }; },
+    'strict proxy (throws on unknown members)': () => {
+      const known = new Set(['addListener', 'play', 'stop', 'pause', 'resume', 'seekTo', 'setAspect']);
+      const proxy = new Proxy({}, { get(_t, k) { if (k === 'then' || typeof k === 'symbol') return undefined; if (!known.has(k)) throw new Error('plugin member not implemented: ' + String(k)); return () => Promise.resolve({ remove() {} }); } });
+      window.Capacitor = { isNativePlatform: () => true, isPluginAvailable: () => true, registerPlugin: () => proxy };
+    },
+    'isPluginAvailable throws': () => { window.Capacitor = { isNativePlatform: () => true, isPluginAvailable: () => { throw new Error('x'); } }; },
+  };
+  for (const [name, init] of Object.entries(variants)) {
+    const c = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await c.addInitScript(init);
+    const pg = await c.newPage();
+    const pe = []; pg.on('pageerror', (e) => pe.push(e.message));
+    await pg.goto(base + '/');
+    await pg.waitForSelector('#modal:not([hidden])');
+    const tabsText = await pg.textContent('#tabs');
+    ok(tabsText.includes('مباشر') && (await pg.getAttribute('#q', 'placeholder')).length > 3, `[${name}] app boots with texts and tabs`);
+    await pg.fill('input[type=url]', base + '/list.m3u');
+    await pg.click('form button[type=submit]');
+    await pg.waitForSelector('.card');
+    ok(true, `[${name}] list loads`);
+    ok((await pg.locator('#crash').count()) === 0 && pe.length === 0, `[${name}] no crash banner / page errors (${pe.join('|')})`);
+    await c.close();
+  }
+  // crash banner itself works: an uncaught error must be shown on screen
+  const bc = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const bp = await bc.newPage();
+  await bp.goto(base + '/');
+  await bp.waitForSelector('#modal:not([hidden])');
+  await bp.evaluate(() => { setTimeout(() => { throw new Error('visible-failure-test'); }, 0); });
+  await bp.waitForSelector('#crash');
+  ok((await bp.textContent('#crash')).includes('visible-failure-test'), 'uncaught errors are shown on screen (not a blank page)');
+  await bc.close();
+
   console.log('\nJS errors:', errors.length ? errors : 'none');
   ok(errors.length === 0, 'no uncaught JS / console errors');
   console.log(`\n${passed} passed, ${failed} failed`);
