@@ -221,6 +221,72 @@ const ok = (cond, name) => { if (cond) { passed++; console.log('  ✓', name); }
   });
   ok(ms < 150, `search re-render took ${ms.toFixed(0)}ms (<150ms)`);
 
+  console.log('Native (Android) mode simulated with a fake ExoPlayer plugin');
+  const nctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await nctx.addInitScript(() => {
+    const listeners = {}; window.__calls = [];
+    window.__gen = 0;
+    const emit = (n, d) => listeners[n] && listeners[n]({ gen: window.__gen, ...d });
+    window.__emit = emit;
+    const plugin = {
+      addListener: (n, cb) => { listeners[n] = cb; return Promise.resolve({ remove() {} }); },
+      play: (a) => { window.__calls.push(['play', a]); window.__gen = a.gen; const g = a.gen; setTimeout(() => emit('state', { gen: g, state: a.url.includes('dead') ? 'error' : 'playing', message: 'ERROR_CODE_IO_BAD_HTTP_STATUS' }), 80); return Promise.resolve(); },
+      stop: () => { window.__calls.push(['stop']); return Promise.resolve(); },
+      pause: () => { window.__calls.push(['pause']); return Promise.resolve(); },
+      resume: () => { window.__calls.push(['resume']); return Promise.resolve(); },
+      seekTo: (a) => { window.__calls.push(['seekTo', a]); return Promise.resolve(); },
+      setAspect: (a) => { window.__calls.push(['setAspect', a]); return Promise.resolve(); },
+    };
+    window.Capacitor = { isNativePlatform: () => true, isPluginAvailable: (n) => n === 'AuraPlayer', registerPlugin: () => plugin };
+  });
+  const np = await nctx.newPage();
+  np.on('pageerror', (e) => errors.push('pageerror(native): ' + e.message));
+  np.on('dialog', (d) => d.accept());
+  await np.goto(base + '/');
+  await np.waitForSelector('#modal:not([hidden])');
+  await np.fill('input[type=url]', base + '/list.m3u');
+  await np.click('form button[type=submit]');
+  await np.waitForSelector('.card');
+  await np.locator('.card').first().click();
+  await np.waitForSelector('#player:not([hidden])');
+  await np.waitForFunction(() => window.__calls.some((c) => c[0] === 'play'));
+  ok(await np.evaluate(() => window.__calls.find((c) => c[0] === 'play')[1].url.includes('/stream/')), 'native play() receives the stream URL');
+  ok(await np.evaluate(() => document.documentElement.classList.contains('native-playing')), 'page goes transparent (native-playing) so the video shows through');
+  ok(await np.evaluate(() => getComputedStyle(document.querySelector('#player')).backgroundColor) === 'rgba(0, 0, 0, 0)', 'player overlay is transparent');
+  await np.waitForFunction(() => document.querySelector('#pStatus').hidden);
+  ok(true, 'spinner hides once native reports "playing"');
+  await np.click('#cPlay');
+  ok(await np.evaluate(() => window.__calls.some((c) => c[0] === 'pause')), 'pause button calls native pause');
+  await np.click('#cAspect');
+  ok(await np.evaluate(() => window.__calls.filter((c) => c[0] === 'setAspect').pop()[1].mode) === 'cover', 'aspect button calls native setAspect(cover)');
+  await np.evaluate(() => window.__emit('state', { state: 'buffering' }));
+  await np.waitForSelector('#pStatus:not([hidden])');
+  await np.evaluate(() => window.__emit('state', { state: 'playing' }));
+  await np.waitForFunction(() => document.querySelector('#pStatus').hidden);
+  ok(true, 'buffering spinner shows then clears');
+  await np.evaluate(() => window.__emit('state', { state: 'error', message: 'ERROR_CODE_IO_NETWORK_CONNECTION_FAILED' }));
+  await np.waitForSelector('#pStatusText');
+  ok(/إعادة الاتصال|reconnect/i.test(await np.textContent('#pStatusText')), 'mid-stream native error triggers auto-reconnect UI');
+  await np.waitForFunction(() => window.__calls.filter((c) => c[0] === 'play').length >= 2, null, { timeout: 8000 });
+  ok(true, 'auto-reconnect calls native play() again');
+  await np.goBack();
+  await np.waitForSelector('#player', { state: 'hidden' });
+  ok(await np.evaluate(() => window.__calls.some((c) => c[0] === 'stop') && !document.documentElement.classList.contains('native-playing')), 'closing player stops native + restores page background');
+  // VOD: seek bar driven by native time events
+  await np.evaluate(() => { const s = window.__aura.S; const c = { id: 'vod1', name: 'Movie', url: location.origin + '/vid.mp4', group: 'm', type: 'movie', quality: '' }; window.__aura.play(c, [c]); });
+  await np.waitForFunction(() => window.__calls.filter((c) => c[0] === 'play').length >= 3);
+  await np.evaluate(() => { window.__emit('state', { state: 'playing' }); window.__emit('time', { pos: 30000, dur: 120000, paused: false }); });
+  await np.waitForFunction(() => document.querySelector('#tDur').textContent === '2:00');
+  ok((await np.inputValue('#seek')) === '250', 'seek bar shows 25% from native time events');
+  await np.fill('#seek', '500');
+  ok(await np.evaluate(() => window.__calls.filter((c) => c[0] === 'seekTo').pop()[1].ms) === 60000, 'dragging seek bar calls native seekTo(60000)');
+  await np.goBack();
+  await np.waitForSelector('#player', { state: 'hidden' });
+  await np.evaluate(() => { const c = { id: 'dead2', name: 'Dead', url: location.origin + '/dead.mp4', group: 'x', type: 'live', quality: '' }; window.__aura.play(c, [c]); });
+  await np.waitForSelector('#pStatus.err', { timeout: 10000 });
+  ok(true, 'native error on first play shows the error screen');
+  await nctx.close();
+
   console.log('\nJS errors:', errors.length ? errors : 'none');
   ok(errors.length === 0, 'no uncaught JS / console errors');
   console.log(`\n${passed} passed, ${failed} failed`);

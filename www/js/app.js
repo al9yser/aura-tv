@@ -2,6 +2,7 @@ import { parseM3U, normalize } from './parser.js';
 import * as X from './xtream.js';
 import { LS, kvGet, kvSet, kvDel } from './store.js';
 import { Engine } from './player.js';
+import { isNative, NativeVideo, NativeEngine } from './native.js';
 
 /* ------------------------------------------------------------------ i18n */
 const T = {
@@ -587,13 +588,18 @@ async function openSeries(c) {
 }
 
 /* ------------------------------------------------------------------ player */
-const video = $('#video');
 const playerEl = $('#player');
-const engine = new Engine(video, {
+// On Android the native ExoPlayer plugin does the decoding; in a browser the <video> element does.
+const NATIVE = isNative();
+const nv = NATIVE ? new NativeVideo(window.Capacitor.registerPlugin('AuraPlayer')) : null;
+const video = NATIVE ? nv : $('#video');
+const playerHooks = {
   onBuffering: (b) => { if (b) { if (!S.statusMode) setStatus('buffer'); } else if (S.statusMode === 'buffer' || S.statusMode === 'loading') setStatus(null); },
   onPlaying: () => { if (S.statusMode && S.statusMode !== 'error') setStatus(null); },
   onFatal: () => onFatal(),
-});
+};
+const engine = NATIVE ? new NativeEngine(nv, playerHooks) : new Engine(video, playerHooks);
+if (NATIVE) playerEl.classList.add('native');
 
 function setStatus(mode, text, actions) {
   S.statusMode = mode;
@@ -614,7 +620,11 @@ function updatePlayerFav() {
 }
 function updatePlayIcon() { $('#cPlay').innerHTML = ic(video.paused ? 'play' : 'pause', 'fill'); }
 
-function applyAspect() { video.classList.toggle('cover', S.settings.aspect === 'cover'); video.classList.toggle('fill', S.settings.aspect === 'fill'); }
+function applyAspect() {
+  video.classList.toggle('cover', S.settings.aspect === 'cover');
+  video.classList.toggle('fill', S.settings.aspect === 'fill');
+  if (NATIVE) { try { const r = nv.p.setAspect({ mode: S.settings.aspect }); if (r && r.catch) r.catch(() => {}); } catch (_) { /* ignore */ } }
+}
 
 function play(c, list) {
   if (c.type === 'series' && c.seriesId != null) { openSeries(c); return; }
@@ -627,6 +637,7 @@ function play(c, list) {
   if (!wasOpen) {
     S.lastFocus = document.activeElement;
     playerEl.hidden = false;
+    if (NATIVE) document.documentElement.classList.add('native-playing');
     pushLayer('player', hidePlayerUI);
     document.body.style.overflow = 'hidden';
   }
@@ -706,6 +717,7 @@ function hidePlayerUI() {
   releaseWake();
   setStatus(null);
   playerEl.hidden = true;
+  document.documentElement.classList.remove('native-playing');
   document.body.style.overflow = '';
   S.current = null;
   try { if (document.pictureInPictureElement) document.exitPictureInPicture(); } catch (_) { /* ignore */ }

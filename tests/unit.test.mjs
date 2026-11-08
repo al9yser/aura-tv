@@ -97,3 +97,103 @@ test('player engine plan', () => {
   assert.equal(planChain('http://a/1234', true)[0], 'mpegts');
   assert.equal(planChain('http://a/1234', false)[0], 'native');
 });
+
+// ---------- native bridge (fake plugin; no Android needed) ----------
+import { NativeVideo, NativeEngine, isNative } from '../www/js/native.js';
+
+function fakePlugin() {
+  const l = {}; const calls = [];
+  const p = {
+    calls,
+    addListener: (n, cb) => { l[n] = cb; return Promise.resolve({ remove() {} }); },
+    gen: 0,
+    emit: (n, d) => l[n] && l[n]({ gen: p.gen, ...d }),
+    play: (a) => { calls.push(['play', a]); p.gen = a.gen; return Promise.resolve(); },
+    stop: () => { calls.push(['stop']); return Promise.resolve(); },
+    pause: () => { calls.push(['pause']); return Promise.resolve(); },
+    resume: () => { calls.push(['resume']); return Promise.resolve(); },
+    seekTo: (a) => { calls.push(['seekTo', a]); return Promise.resolve(); },
+    setAspect: (a) => { calls.push(['setAspect', a]); return Promise.resolve(); },
+  };
+  return p;
+}
+const mkEngine = () => {
+  const plugin = fakePlugin(); const nv = new NativeVideo(plugin);
+  const log = [];
+  const eng = new NativeEngine(nv, { onBuffering: (b) => log.push('buf:' + b), onPlaying: () => log.push('playing'), onFatal: (e) => log.push('fatal:' + e.message) });
+  return { plugin, nv, eng, log };
+};
+
+test('isNative is false outside Capacitor', () => { assert.equal(isNative(), false); });
+
+test('native: play resolves on first "playing" and sends args to the plugin', async () => {
+  const { plugin, eng, nv } = mkEngine();
+  const p = eng.play('http://h/1.m3u8', { live: true, buffer: 'low' });
+  plugin.emit('state', { state: 'playing' });
+  assert.equal(await p, 'native');
+  const sent = plugin.calls.find((c) => c[0] === 'play')[1];
+  assert.deepEqual({ url: sent.url, live: sent.live, buffer: sent.buffer }, { url: 'http://h/1.m3u8', live: true, buffer: 'low' });
+  assert.ok(Number.isInteger(sent.gen));
+  assert.equal(nv.paused, false);
+});
+
+test('native: error before playing rejects; error after playing is fatal', async () => {
+  const a = mkEngine();
+  const p = a.eng.play('http://x', {});
+  a.plugin.emit('state', { state: 'error', message: 'ERROR_CODE_IO_NETWORK_CONNECTION_FAILED' });
+  await assert.rejects(p, /NETWORK_CONNECTION_FAILED/);
+  const b = mkEngine();
+  const q = b.eng.play('http://x', {});
+  b.plugin.emit('state', { state: 'playing' });
+  await q;
+  b.plugin.emit('state', { state: 'error', message: 'boom' });
+  assert.deepEqual(b.log.filter((x) => x.startsWith('fatal')), ['fatal:boom']);
+});
+
+test('native: stop cancels a pending play; plugin rejection surfaces', async () => {
+  const a = mkEngine();
+  const p = a.eng.play('http://x', {});
+  a.eng.stop();
+  await assert.rejects(p, /cancelled/);
+  assert.ok(a.plugin.calls.some((c) => c[0] === 'stop'));
+  const b = mkEngine();
+  b.plugin.play = () => Promise.reject(new Error('no url'));
+  await assert.rejects(b.eng.play('', {}), /no url/);
+});
+
+test('native: buffering hook only after start; time events drive currentTime/duration', async () => {
+  const { plugin, eng, nv, log } = mkEngine();
+  const p = eng.play('http://x', { live: false });
+  plugin.emit('state', { state: 'buffering' });
+  assert.ok(!log.includes('buf:true'));
+  plugin.emit('state', { state: 'playing' }); await p;
+  plugin.emit('state', { state: 'buffering' });
+  assert.ok(log.includes('buf:true'));
+  let ticks = 0; nv.addEventListener('timeupdate', () => ticks++);
+  plugin.emit('time', { pos: 12500, dur: 60000, paused: false });
+  assert.equal(nv.currentTime, 12.5); assert.equal(nv.duration, 60); assert.equal(ticks, 1);
+  plugin.emit('time', { pos: 1, dur: -1, paused: true });
+  assert.ok(Number.isNaN(nv.duration)); assert.equal(nv.paused, true);
+});
+
+test('native: video facade seeks, pauses and resumes through the plugin', () => {
+  const { plugin, nv } = mkEngine();
+  nv.currentTime = 30; nv.pause(); nv.play();
+  assert.deepEqual(plugin.calls.map((c) => c[0]), ['seekTo', 'pause', 'resume']);
+  assert.equal(plugin.calls[0][1].ms, 30000);
+});
+
+test('native: late events from an older stream (stale gen) are ignored', async () => {
+  const { plugin, eng, log } = mkEngine();
+  const p1 = eng.play('http://old', {});
+  const staleGen = plugin.gen;
+  const p2 = eng.play('http://new', {});
+  await assert.rejects(p1, /cancelled/);
+  plugin.emit('state', { state: 'playing', gen: staleGen }); // belongs to the old stream
+  let settled = false; p2.then(() => { settled = true; }, () => { settled = true; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(settled, false, 'new play must not resolve from an old stream event');
+  plugin.emit('state', { state: 'playing' });
+  assert.equal(await p2, 'native');
+  assert.ok(!log.includes('fatal:boom'));
+});
