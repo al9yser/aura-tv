@@ -46,14 +46,23 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          PROPS=gradle/wrapper/gradle-wrapper.properties
           # the default 10s download timeout is too short when the Gradle host is slow
-          sed -i 's/^networkTimeout=.*/networkTimeout=180000/' gradle/wrapper/gradle-wrapper.properties
-          grep networkTimeout gradle/wrapper/gradle-wrapper.properties
-          # network hiccups while downloading Gradle/dependencies are retried
+          sed -i 's/^networkTimeout=.*/networkTimeout=180000/' $PROPS
+          VER=$(grep -oE 'gradle-[0-9.]+-(all|bin)\.zip' $PROPS | head -1 | sed -E 's/gradle-([0-9.]+)-.*/\1/')
+          echo "Gradle wrapper version: $VER"
+          # attempt 1: smaller -bin distribution from the official host
+          # attempt 2: mirror (used when the official/GitHub release host is down)
+          # attempt 3: official again
           for attempt in 1 2 3; do
+            case $attempt in
+              2) sed -i "s#^distributionUrl=.*#distributionUrl=https://mirrors.cloud.tencent.com/gradle/gradle-${VER}-bin.zip#" $PROPS ;;
+              *) sed -i "s#^distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-${VER}-bin.zip#" $PROPS ;;
+            esac
+            grep distributionUrl $PROPS
             ./gradlew assembleDebug --no-daemon --stacktrace && exit 0
-            echo "Gradle attempt $attempt failed; retrying in 45s..."
-            sleep 45
+            echo "Gradle attempt $attempt failed; retrying in 30s..."
+            sleep 30
           done
           exit 1
 
