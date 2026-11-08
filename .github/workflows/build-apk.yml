@@ -46,11 +46,14 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          # the default 10s download timeout is too short when the Gradle host is slow
+          sed -i 's/^networkTimeout=.*/networkTimeout=180000/' gradle/wrapper/gradle-wrapper.properties
+          grep networkTimeout gradle/wrapper/gradle-wrapper.properties
           # network hiccups while downloading Gradle/dependencies are retried
           for attempt in 1 2 3; do
             ./gradlew assembleDebug --no-daemon --stacktrace && exit 0
-            echo "Gradle attempt $attempt failed; retrying in 20s..."
-            sleep 20
+            echo "Gradle attempt $attempt failed; retrying in 45s..."
+            sleep 45
           done
           exit 1
 
