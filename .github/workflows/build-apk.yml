@@ -46,7 +46,13 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          # network hiccups while downloading Gradle/dependencies are retried
+          for attempt in 1 2 3; do
+            ./gradlew assembleDebug --no-daemon --stacktrace && exit 0
+            echo "Gradle attempt $attempt failed; retrying in 20s..."
+            sleep 20
+          done
+          exit 1
 
       - name: Rename APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk aura-tv.apk
