@@ -162,6 +162,9 @@ const ok = (cond, name) => { if (cond) { passed++; console.log('  ✓', name); }
   await page.click('.ep >> nth=0');
   await page.waitForFunction(() => document.querySelector('#video').currentTime > 0.2, null, { timeout: 15000 });
   ok(true, 'episode plays');
+  const topEl = await page.evaluate(() => { const e = document.elementFromPoint(innerWidth / 2, innerHeight / 2); return !!(e && e.closest('#player')); });
+  ok(topEl, 'player is VISIBLE on top of the episode list (not hidden behind the modal)');
+  await page.screenshot({ path: path.join(SHOTS, '09-series-playing.png') });
   await page.goBack();
   await page.waitForSelector('#player', { state: 'hidden' });
   ok(await page.locator('.ep').count() === 2, 'closing player returns to episode list');
@@ -285,6 +288,19 @@ const ok = (cond, name) => { if (cond) { passed++; console.log('  ✓', name); }
   await np.evaluate(() => { const c = { id: 'dead2', name: 'Dead', url: location.origin + '/dead.mp4', group: 'x', type: 'live', quality: '' }; window.__aura.play(c, [c]); });
   await np.waitForSelector('#pStatus.err', { timeout: 10000 });
   ok(true, 'native error on first play shows the error screen');
+  ok((await np.textContent('#pDetail')).includes('ERROR_CODE_IO_BAD_HTTP_STATUS'), 'error screen shows the real native error code');
+  await np.click('#pActions button:last-child');
+  await np.waitForSelector('#player', { state: 'hidden' });
+  // open a modal (like the series list) and play from it: modal must not cover the native video layer
+  await np.click('#btnSource');
+  await np.waitForSelector('#modal:not([hidden])');
+  await np.evaluate(() => { const c = { id: 'ep1', name: 'Episode', url: location.origin + '/vid.mp4', group: 'S1', type: 'movie', quality: '' }; window.__aura.play(c, [c]); });
+  await np.waitForSelector('#player:not([hidden])');
+  ok(await np.evaluate(() => getComputedStyle(document.querySelector('#modal')).visibility) === 'hidden', 'native mode: modal is hidden while video plays');
+  ok(await np.evaluate(() => { const e = document.elementFromPoint(innerWidth / 2, innerHeight / 2); return !!(e && e.closest('#player')); }), 'native mode: only the transparent player overlay sits above the video');
+  await np.goBack();
+  await np.waitForSelector('#player', { state: 'hidden' });
+  ok(await np.evaluate(() => getComputedStyle(document.querySelector('#modal')).visibility) === 'visible', 'modal comes back after closing the player');
   await nctx.close();
 
   console.log('Resilience: hostile / strict Capacitor environments must never blank the app');

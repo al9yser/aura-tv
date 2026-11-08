@@ -140,7 +140,7 @@ button { cursor: pointer; }
 .empty b { display: block; color: var(--text); font-size: 1.1rem; margin-bottom: 6px; }
 
 /* ---------- player ---------- */
-.player { position: fixed; inset: 0; z-index: 50; background: #000; overflow: hidden; }
+.player { position: fixed; inset: 0; z-index: 70; background: #000; overflow: hidden; }
 .player video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; object-fit: contain; }
 .player video.cover { object-fit: cover; }
 .player video.fill { object-fit: fill; }
@@ -165,6 +165,8 @@ button { cursor: pointer; }
 }
 .p-status .p-actions { display: flex; gap: 10px; pointer-events: auto; }
 .p-status.err { background: rgba(10, 8, 14, .85); }
+.p-detail { max-width: 92%; color: var(--muted); font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; direction: ltr; word-break: break-word; }
+.p-detail:empty { display: none; }
 .p-status.err .spinner { display: none; }
 .spinner { width: 46px; height: 46px; border-radius: 50%; border: 4px solid rgba(255, 255, 255, .18); border-top-color: var(--gold); animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -182,7 +184,7 @@ button { cursor: pointer; }
 .player.native { background: transparent; }
 .player.native video { display: none; }
 html.native-playing, html.native-playing body { background: transparent; }
-html.native-playing #app { visibility: hidden; }
+html.native-playing #app, html.native-playing #modal { visibility: hidden; }
 
 /* ---------- modal ---------- */
 .modal { position: fixed; inset: 0; z-index: 60; background: rgba(8, 6, 12, .72); display: flex; align-items: center; justify-content: center; padding: 16px; }

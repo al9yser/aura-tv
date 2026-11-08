@@ -594,7 +594,7 @@ const playerEl = $('#player');
 const playerHooks = {
   onBuffering: (b) => { if (b) { if (!S.statusMode) setStatus('buffer'); } else if (S.statusMode === 'buffer' || S.statusMode === 'loading') setStatus(null); },
   onPlaying: () => { if (S.statusMode && S.statusMode !== 'error') setStatus(null); },
-  onFatal: () => onFatal(),
+  onFatal: (e) => onFatal(e),
 };
 let NATIVE = false;
 let nv = null;
@@ -614,13 +614,14 @@ try {
 }
 if (!engine) engine = new Engine(video, playerHooks);
 
-function setStatus(mode, text, actions) {
+function setStatus(mode, text, actions, detail) {
   S.statusMode = mode;
   const box = $('#pStatus');
   if (!mode) { box.hidden = true; return; }
   box.hidden = false;
   box.classList.toggle('err', mode === 'error');
   $('#pStatusText').textContent = text || (mode === 'loading' ? t('starting') : '');
+  $('#pDetail').textContent = mode === 'error' ? (detail || '') : '';
   $('#pActions').replaceChildren(...(actions || []));
   if (mode === 'error' || mode === 'retry') bump(true);
 }
@@ -675,6 +676,7 @@ async function startPlayback(c, auto) {
   const tok = ++S.playTok;
   setStatus(auto ? 'retry' : 'loading', auto ? t('reconnecting', S.retries, 5) : t('starting'));
   const live = c.type === 'live';
+  let lastErr = null;
   for (const u of [c.url, c.alt].filter(Boolean)) {
     try {
       await engine.play(u, { live, buffer: S.settings.buffer });
@@ -683,10 +685,11 @@ async function startPlayback(c, auto) {
       return;
     } catch (e) {
       if (tok !== S.playTok || (e && e.message === 'cancelled')) return;
+      lastErr = e;
     }
   }
   if (auto && S.retries < 5) { scheduleRetry(); return; }
-  showPlayError();
+  showPlayError(lastErr);
 }
 
 function scheduleRetry() {
@@ -697,18 +700,19 @@ function scheduleRetry() {
   clearTimeout(S.retryTimer);
   S.retryTimer = setTimeout(() => { if (S.current && !playerEl.hidden) startPlayback(S.current, true); }, Math.min(1500 * 2 ** (n - 1), 10000));
 }
-function onFatal() {
+function onFatal(err) {
   if (!S.current || playerEl.hidden) return;
-  if (S.current.type !== 'live') { showPlayError(); return; }
+  if (S.current.type !== 'live') { showPlayError(err); return; }
   scheduleRetry();
 }
-function showPlayError() {
+const errDetail = (e) => { const m = e && e.message ? String(e.message) : ''; return m && m !== 'failed' && m !== 'cancelled' ? m.slice(0, 200) : ''; };
+function showPlayError(err) {
   S.playTok++;
   engine.stop();
   const acts = [h('button', { class: 'btn', type: 'button', text: t('retry'), onclick: () => { S.retries = 0; startPlayback(S.current, false); } })];
   if (S.playlist.length > 1) acts.push(h('button', { class: 'btn ghost', type: 'button', text: t('nextCh'), onclick: () => zap(1) }));
   acts.push(h('button', { class: 'btn ghost', type: 'button', text: t('back'), onclick: closePlayer }));
-  setStatus('error', t('playError'), acts);
+  setStatus('error', t('playError'), acts, errDetail(err));
   const first = $('#pActions button');
   if (first) first.focus({ preventScroll: true });
 }

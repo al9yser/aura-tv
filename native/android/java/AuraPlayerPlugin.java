@@ -15,6 +15,7 @@ import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.datasource.HttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
@@ -186,7 +187,14 @@ public class AuraPlayerPlugin extends Plugin {
                                 player.prepare();
                                 return;
                             }
-                            emit("error", error.getErrorCodeName());
+                            String detail = error.getErrorCodeName();
+                            Throwable cause = error.getCause();
+                            if (cause instanceof HttpDataSource.InvalidResponseCodeException) {
+                                detail += " (HTTP " + ((HttpDataSource.InvalidResponseCodeException) cause).responseCode + ")";
+                            } else if (cause != null && cause.getMessage() != null) {
+                                detail += ": " + cause.getMessage();
+                            }
+                            emit("error", detail);
                         }
                     });
 
